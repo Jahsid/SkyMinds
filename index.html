@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Weather & Air Quality Map</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css"
+  />
+  <style>
+    #map {
+      height: 100vh;
+      width: 100%;
+    }
+    .popup-content {
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .safe { color: green; }
+    .moderate { color: orange; }
+    .danger { color: red; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+  <script>
+    const map = L.map("map").setView([20.5937, 78.9629], 4);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© OpenStreetMap contributors",
+    }).addTo(map);
+
+    // Helper for generic status (e.g. PM2.5, rainfall)
+    function getStatusLabel(value, low, medium) {
+      if (value <= low) return '<span class="safe">✅ Safe</span>';
+      if (value <= medium) return '<span class="moderate">⚠️ Moderate</span>';
+      return '<span class="danger">🚨 Dangerous</span>';
+    }
+
+    // Special logic for temperature
+    function getTempStatus(temp) {
+      if (temp < 5 || temp > 40) return '<span class="danger">🚨 Dangerous</span>';
+      if (temp < 15 || temp > 35) return '<span class="moderate">⚠️ Moderate</span>';
+      return '<span class="safe">✅ Safe</span>';
+    }
+
+    map.on("click", async function (e) {
+      const { lat, lng } = e.latlng;
+
+      const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,precipitation,cloudcover,wind_speed_10m&timezone=auto`;
+      const airQualityUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lng}&hourly=pm10,pm2_5,carbon_monoxide,ozone&timezone=auto`;
+      const locationUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`;
+
+      try {
+        const [weatherRes, airRes, locationRes] = await Promise.all([
+          fetch(weatherUrl),
+          fetch(airQualityUrl),
+          fetch(locationUrl),
+        ]);
+
+        const weatherData = await weatherRes.json();
+        const airData = await airRes.json();
+        const locationData = await locationRes.json();
+
+        const placeName = locationData.display_name || "Unknown Location";
+
+        // Weather values
+        const current = weatherData.current;
+        const temp = current.temperature_2m;
+        const rain = current.precipitation;
+        const cloud = current.cloudcover;
+        const wind = current.wind_speed_10m;
+
+        // Air quality (hourly)
+        const air = airData.hourly;
+        const pm25 = air.pm2_5[0];
+        const pm10 = air.pm10[0];
+        const co = air.carbon_monoxide[0];
+        const ozone = air.ozone[0];
+
+        // Status labels
+        const tempStatus = getTempStatus(temp);
+        const rainStatus = getStatusLabel(rain, 10, 50);
+        const cloudStatus = getStatusLabel(cloud, 60, 90);
+        const windStatus = getStatusLabel(wind, 20, 35);
+        const pm25Status = getStatusLabel(pm25, 12, 35);
+        const pm10Status = getStatusLabel(pm10, 50, 100);
+        const coStatus = getStatusLabel(co, 4400, 9400);
+        const ozoneStatus = getStatusLabel(ozone, 100, 180);
+
+        const popupContent = `
+          <div class="popup-content">
+            <strong>📍 ${placeName}</strong><br/>
+            <em>Latitude: ${lat.toFixed(2)}, Longitude: ${lng.toFixed(2)}</em><br/><br/>
+
+            <strong>🌦️ Weather Info</strong><br/>
+            🌡️ Temperature: ${temp} °C — ${tempStatus}<br/>
+            🌧️ Rainfall: ${rain} mm — ${rainStatus}<br/>
+            💨 Wind: ${wind} km/h — ${windStatus}<br/>
+            ☁️ Cloud Cover: ${cloud}% — ${cloudStatus}<br/><br/>
+
+            <strong>🏭 Air Quality</strong><br/>
+            PM2.5: ${pm25} µg/m³ — ${pm25Status}<br/>
+            PM10: ${pm10} µg/m³ — ${pm10Status}<br/>
+            CO: ${co} µg/m³ — ${coStatus}<br/>
+            Ozone: ${ozone} µg/m³ — ${ozoneStatus}
+          </div>
+        `;
+
+        L.popup()
+          .setLatLng([lat, lng])
+          .setContent(popupContent)
+          .openOn(map);
+      } catch (err) {
+        console.error("Error fetching data", err);
+        alert("Failed to load data for this location.");
+      }
+    });
+  </script>
+</body>
+</html>
